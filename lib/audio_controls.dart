@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'config.dart';
 import 'player_manager.dart';
-import 'prefs.dart';
-import 'settings_sheet.dart';
 import 'subtitle_sync.dart';
 import 'theme.dart';
 import 'transcript_notifier.dart';
 
-/// The seekbar + button row. Reused in both portrait and landscape layouts.
+/// The (optional) seekbar + button row. Reused in both portrait and
+/// landscape layouts. The seekbar is shown only when [kShowSeekbar] is true;
+/// the font-size and translation-toggle buttons have been removed (those
+/// settings are now fixed in config).
 class AudioControls extends ConsumerStatefulWidget {
   const AudioControls({super.key});
 
@@ -30,8 +32,7 @@ class _AudioControlsState extends ConsumerState<AudioControls> {
     final hasDuration = totalSecs > 0;
     final livePosSecs = sync.position.inMicroseconds / 1e6;
     final displaySecs = _dragValue ?? livePosSecs;
-    final displayPos =
-        Duration(microseconds: (displaySecs * 1e6).round());
+    final displayPos = Duration(microseconds: (displaySecs * 1e6).round());
 
     final canPrev = sync.segmentIndex > 0;
     final canNext =
@@ -42,84 +43,79 @@ class _AudioControlsState extends ConsumerState<AudioControls> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ── Seekbar row ────────────────────────────────────────────────
-          Row(
-            children: [
-              SizedBox(
-                width: 44,
-                child: Text(
-                  _fmt(displayPos),
-                  style: AppText.sans(
-                    size: 12,
-                    color: AppColors.muted,
+          // ── Seekbar row (optional) ─────────────────────────────────────
+          if (kShowSeekbar)
+            Row(
+              children: [
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    _fmt(displayPos),
+                    style: AppText.sans(size: 12, color: AppColors.muted),
                   ),
                 ),
-              ),
-              Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    activeTrackColor: AppColors.accent,
-                    inactiveTrackColor: AppColors.border,
-                    thumbColor: AppColors.accent,
-                    overlayColor: AppColors.accentDim,
-                    trackHeight: 3,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 7,
-                      pressedElevation: 0,
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      activeTrackColor: AppColors.accent,
+                      inactiveTrackColor: AppColors.border,
+                      thumbColor: AppColors.accent,
+                      overlayColor: AppColors.accentDim,
+                      trackHeight: 3,
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 7,
+                        pressedElevation: 0,
+                      ),
+                      overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 16,
+                      ),
                     ),
-                    overlayShape:
-                        const RoundSliderOverlayShape(overlayRadius: 16),
-                  ),
-                  child: Slider(
-                    min: 0,
-                    max: hasDuration ? totalSecs : 1,
-                    value: hasDuration
-                        ? displaySecs.clamp(0, totalSecs).toDouble()
-                        : 0,
-                    onChangeStart: hasDuration
-                        ? (v) {
-                            ref
-                                .read(subtitleSyncProvider.notifier)
-                                .setScrubbing(true);
-                            setState(() => _dragValue = v);
-                          }
-                        : null,
-                    onChanged: hasDuration
-                        ? (v) => setState(() => _dragValue = v)
-                        : null,
-                    onChangeEnd: hasDuration
-                        ? (v) async {
-                            await PlayerManager.instance.controller.seekTo(
-                              seconds: v,
-                              allowSeekAhead: true,
-                            );
-                            ref
-                                .read(subtitleSyncProvider.notifier)
-                                .setScrubbing(false);
-                            setState(() => _dragValue = null);
-                          }
-                        : null,
+                    child: Slider(
+                      min: 0,
+                      max: hasDuration ? totalSecs : 1,
+                      value: hasDuration
+                          ? displaySecs.clamp(0, totalSecs).toDouble()
+                          : 0,
+                      onChangeStart: hasDuration
+                          ? (v) {
+                              ref
+                                  .read(subtitleSyncProvider.notifier)
+                                  .setScrubbing(true);
+                              setState(() => _dragValue = v);
+                            }
+                          : null,
+                      onChanged: hasDuration
+                          ? (v) => setState(() => _dragValue = v)
+                          : null,
+                      onChangeEnd: hasDuration
+                          ? (v) async {
+                              await PlayerManager.instance.controller.seekTo(
+                                seconds: v,
+                                allowSeekAhead: true,
+                              );
+                              ref
+                                  .read(subtitleSyncProvider.notifier)
+                                  .setScrubbing(false);
+                              setState(() => _dragValue = null);
+                            }
+                          : null,
+                    ),
                   ),
                 ),
-              ),
-              SizedBox(
-                width: 44,
-                child: Text(
-                  hasDuration ? _fmt(sync.duration) : '--:--',
-                  textAlign: TextAlign.right,
-                  style: AppText.sans(size: 12, color: AppColors.muted),
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    hasDuration ? _fmt(sync.duration) : '--:--',
+                    textAlign: TextAlign.right,
+                    style: AppText.sans(size: 12, color: AppColors.muted),
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
           // ── Button row ─────────────────────────────────────────────────
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _CircleBtn(
-                icon: Icons.text_fields,
-                onTap: () => ref.read(prefsProvider.notifier).cycleFontSize(),
-              ),
               _CircleBtn(
                 icon: Icons.skip_previous,
                 enabled: canPrev,
@@ -144,10 +140,6 @@ class _AudioControlsState extends ConsumerState<AudioControls> {
                 onTap: canNext
                     ? () => _seekToSegment(segments, sync.segmentIndex + 1)
                     : null,
-              ),
-              _CircleBtn(
-                icon: Icons.tune,
-                onTap: () => showTranscriptSettingsSheet(context),
               ),
             ],
           ),
@@ -200,10 +192,7 @@ class _CircleBtn extends StatelessWidget {
         width: size,
         height: size,
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: bg,
-        ),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
         child: Icon(icon, size: iconSize, color: color),
       ),
     );

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
+import 'config.dart';
 import 'player_manager.dart';
-import 'prefs.dart';
 import 'subtitle_sync.dart';
 import 'theme.dart';
 import 'transcript_notifier.dart';
@@ -38,7 +38,10 @@ class _TranscriptPanelState extends ConsumerState<TranscriptPanel> {
 
   static const _followDelay = Duration(seconds: 2);
   static const _snapDuration = Duration(milliseconds: 600);
-  static const _activeAlign = 0.4; // 0=top, 0.5=middle. Slightly above center.
+
+  // Active-segment vertical anchor. Sourced from config so a recording can
+  // sit the active line high in the panel (crop to video + first segments).
+  static const _activeAlign = kActiveAlign;
 
   // Translations show for the active segment plus this many on each side,
   // giving a moving window of (2 * _halfWindow + 1) = 9 translated segments.
@@ -87,10 +90,10 @@ class _TranscriptPanelState extends ConsumerState<TranscriptPanel> {
     // Don't fight the user while they're scrolling.
     if (_isUserScrolling) return;
 
-    // Near the list ends the segment physically can't reach alignment 0.4
-    // (not enough content past it), so a scrollTo there would clamp — and a
-    // clamped scroll re-resolving against a window-edge height change is the
-    // edge bounce. In this zone the segment is already on screen anyway, so
+    // Near the list ends the segment physically can't reach the alignment
+    // anchor (not enough content past it), so a scrollTo there would clamp —
+    // and a clamped scroll re-resolving against a window-edge height change
+    // is the edge bounce. In this zone the segment is already on screen, so
     // just don't follow. The user still sees it; we simply stop nudging.
     final total = ref.read(transcriptNotifierProvider).segments.length;
     final nearEdge =
@@ -108,7 +111,6 @@ class _TranscriptPanelState extends ConsumerState<TranscriptPanel> {
     ref.listen<SubtitleSyncState>(subtitleSyncProvider, _onSyncChange);
 
     final tsState = ref.watch(transcriptNotifierProvider);
-    final prefs = ref.watch(prefsProvider);
     final sync = ref.watch(subtitleSyncProvider);
 
     if (tsState.status == TranscriptStatus.loading ||
@@ -152,7 +154,7 @@ class _TranscriptPanelState extends ConsumerState<TranscriptPanel> {
       });
     }
 
-    return NotificationListener<ScrollNotification>(
+    final list = NotificationListener<ScrollNotification>(
       onNotification: (n) {
         // Ignore everything our own programmatic scrolls produce.
         if (_autoScrolling) return false;
@@ -180,12 +182,14 @@ class _TranscriptPanelState extends ConsumerState<TranscriptPanel> {
         itemCount: segments.length,
         itemScrollController: _itemController,
         itemPositionsListener: _positionsListener,
-        // Small constant slack — same in portrait and landscape (a viewport
-        // fraction made portrait's tall pane over-scroll badly). The first/
-        // last couple of segments won't sit exactly at 0.4, but _onSyncChange
-        // skips the follow scroll near the ends, so there's no clamped
-        // scrollTo to re-resolve and thus no edge bounce.
-        padding: const EdgeInsets.symmetric(vertical: 24),
+        // Small constant slack — same in portrait and landscape. The first/
+        // last couple of segments won't sit exactly at the anchor, but
+        // _onSyncChange skips the follow scroll near the ends, so there's no
+        // clamped scrollTo to re-resolve and thus no edge bounce.
+        padding: EdgeInsets.symmetric(
+          vertical: 24,
+          horizontal: kTranscriptHorizontalPadding,
+        ),
         itemBuilder: (context, i) {
           final isActive = i == activeSeg;
 
@@ -194,19 +198,42 @@ class _TranscriptPanelState extends ConsumerState<TranscriptPanel> {
               activeSeg >= 0 && (i - activeSeg).abs() <= _halfWindow;
 
           final showTranslation =
-              prefs.translationMode == TranslationMode.allSegments ||
-              (prefs.translationMode == TranslationMode.activeOnly && inWindow);
+              kTranslationMode == TranscriptTranslationMode.allSegments ||
+              (kTranslationMode == TranscriptTranslationMode.activeOnly &&
+                  inWindow);
 
           return _SegmentRow(
             segment: segments[i],
             isActive: isActive,
             activeWordIndex: isActive ? activeWord : -1,
-            fontSize: prefs.fontSize,
+            fontSize: kFontSize,
             showTranslation: showTranslation,
             onTapSegment: () => _onSegmentTap(i, segments[i].startTime),
           );
         },
       ),
+    );
+
+    // Subtle top/bottom fade so segments emerge and dissolve at the panel
+    // edges rather than hard-cutting. ShaderMask multiplies the list's alpha
+    // by the gradient; dstIn keeps the list where the gradient is opaque.
+    return ShaderMask(
+      shaderCallback: (rect) {
+        return const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.transparent,
+            Colors.black,
+            Colors.black,
+            Colors.transparent,
+          ],
+          // ~9% fade band at each end.
+          stops: [0.0, 0.09, 0.91, 1.0],
+        ).createShader(rect);
+      },
+      blendMode: BlendMode.dstIn,
+      child: list,
     );
   }
 
@@ -258,17 +285,17 @@ class _SegmentRow extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTapSegment,
       // Plain Container, NOT AnimatedContainer: this widget's height is
-      // determined by its content (words + optional translation). Animating
-      // the highlight here would be fine for color, but we keep the height
-      // change instantaneous so the list's scroll target never drifts
-      // mid-animation — that drift was the source of the bounce.
+      // determined by its content (words + optional translation). The
+      // highlight is animated separately below as a background fill, so the
+      // row's measured size never changes on activation — keeping the list's
+      // scroll target stable (this was the source of the original bounce).
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        margin: EdgeInsets.symmetric(
+          horizontal: 4,
+          vertical: kSegmentSpacing / 2,
+        ),
         child: Stack(
           children: [
-            // Highlight is a background fill behind the content. Animating
-            // its color/opacity here never changes the row's measured size,
-            // so the active-segment scroll target stays stable.
             Positioned.fill(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
@@ -312,7 +339,7 @@ class _SegmentRow extends StatelessWidget {
                     Text(
                       segment.translation,
                       style: AppText.sans(
-                        size: fontSize * 0.7,
+                        size: kTranslationFontSize,
                         color: AppColors.muted,
                         height: 1.35,
                       ),

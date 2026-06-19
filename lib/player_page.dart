@@ -10,7 +10,6 @@ import 'theme.dart';
 import 'transcript_notifier.dart';
 import 'transcript_panel.dart';
 import 'video_overlay.dart';
-import 'prefs.dart';
 
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({super.key});
@@ -31,7 +30,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     // Touch providers so they start listening / loading.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(transcriptNotifierProvider);
-      ref.read(prefsProvider);
       ref.read(subtitleSyncProvider);
     });
   }
@@ -104,7 +102,7 @@ class _VideoBlock extends ConsumerWidget {
   }
 }
 
-// ── Landscape: left column (centered video + controls) | right transcript ─
+// ── Landscape: narrower left column (video + controls) | wider transcript ─
 
 class _LandscapeLayout extends StatelessWidget {
   const _LandscapeLayout();
@@ -115,7 +113,8 @@ class _LandscapeLayout extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          flex: 65,
+          // Left column: video + controls. No divider between the columns.
+          flex: kLandscapeLeftFlex,
           child: Center(
             // LayoutBuilder gives us a bounded width to hand to the column,
             // so AudioControls' Expanded slider has finite width constraints
@@ -130,7 +129,7 @@ class _LandscapeLayout extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: const [
                       _VideoBlock(
-                        borderRadius: BorderRadius.all(Radius.circular(14)),
+                        borderRadius: BorderRadius.all(Radius.circular(18)),
                       ),
                       SizedBox(height: 12),
                       AudioControls(),
@@ -141,8 +140,10 @@ class _LandscapeLayout extends StatelessWidget {
             ),
           ),
         ),
-        Container(width: 1, color: AppColors.border),
-        const Expanded(flex: 35, child: TranscriptPanel()),
+        const Expanded(
+          flex: kLandscapeTranscriptFlex,
+          child: TranscriptPanel(),
+        ),
       ],
     );
   }
@@ -162,7 +163,7 @@ class _PortraitLayout extends StatelessWidget {
         const Padding(
           padding: EdgeInsets.fromLTRB(12, 12, 12, 8),
           child: _VideoBlock(
-            borderRadius: BorderRadius.all(Radius.circular(16)),
+            borderRadius: BorderRadius.all(Radius.circular(18)),
           ),
         ),
         const Expanded(child: TranscriptPanel()),
